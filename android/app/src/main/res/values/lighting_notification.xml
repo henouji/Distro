@@ -1,4 +1,5 @@
 <resources>
+    <color name="lighting_notification_surface">#FFDCEEEB</color>
     <color name="lighting_glass_start">#E6DCEEEB</color>
     <color name="lighting_glass_end">#D9E5DFF0</color>
     <color name="lighting_glass_edge">#CCFFFFFF</color>

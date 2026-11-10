@@ -235,6 +235,7 @@ class LightingService : Service() {
             Notification.Builder(this)
         }
         builder
+            .setColor(getColor(R.color.lighting_notification_surface))
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(if (error != null) "Lighting needs attention" else "HomeHub lighting")
             .setContentText(if (error != null) "Open HomeHub to see the error." else
@@ -244,6 +245,9 @@ class LightingService : Service() {
             .setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .addAction(Notification.Action.Builder(null, "Stop all", actionIntent("stopAll")).build())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setColorized(true)
+        }
         if (controlsLightId != null) {
             val views = RemoteViews(packageName, R.layout.lighting_notification)
             // Decorated collapsed notifications allow only 48dp of custom content.

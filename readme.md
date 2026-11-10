@@ -40,10 +40,11 @@ Open **Lights > Dynamic lighting** (the clock icon).
   controls**. The collapsed notification exposes power, brightness in 10%
   steps, **White** (alternates warm/cool) and **Color** (cycles
   Red/Amber/Green/Blue) where supported, without expanding. Expanding is optional
-  for individual white/color presets and detailed status. Both layouts use
-  rounded translucent teal/lavender panels with light/dark system-theme colors.
-  Android controls the outer notification surface; custom notifications cannot
-  reproduce the app's live backdrop blur.
+  for individual white/color presets and detailed status. On Android 8+, the
+  foreground notification requests full-card colorization using HomeHub's
+  light teal or dark blue glass-surface color, with translucent buttons rather
+  than a separately framed inner panel. Android controls the final rendering
+  and notification shade; custom notifications cannot reproduce live backdrop blur.
   Color brightness changes preserve hue and saturation. **Refresh** reads the
   bulb again; status also refreshes on the background update cycle.
   **Hide notification controls** leaves schedules running.
