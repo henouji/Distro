@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/components/feedback.dart';
 import '../../../core/local_network.dart';
 import '../light.dart';
+import '../light_provider.dart';
 import '../lights_controller.dart';
 
 class LightEditor extends ConsumerStatefulWidget {
@@ -20,6 +21,7 @@ class _LightEditorState extends ConsumerState<LightEditor> {
   DpProfile _profile = DpProfile.modern;
   bool _busy = false;
   String? _error;
+  String? _probeStatus;
 
   @override
   void initState() {
@@ -78,6 +80,7 @@ class _LightEditorState extends ConsumerState<LightEditor> {
     colorDp: _optionalInt('Color DP'),
     brightnessMin: _optionalInt('Brightness minimum') ?? -1,
     valueMax: _optionalInt('Value maximum') ?? 0,
+    presets: widget.config?.presets ?? const [null, null, null],
   );
 
   void _preset(DpProfile profile) {
@@ -99,11 +102,56 @@ class _LightEditorState extends ConsumerState<LightEditor> {
     });
   }
 
+  Future<void> _detectProtocol() async {
+    if (!_form.currentState!.validate()) return;
+    final service = ref.read(lightServiceProvider);
+    if (service is! TuyaLanLightProvider) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _probeStatus = null;
+    });
+    try {
+      final result = await service.detectProtocol(
+        _config(),
+        onAttempt: (version) {
+          if (mounted) {
+            setState(() {
+              _probeStatus = 'Checking protocol $version...';
+            });
+          }
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _version = result.version;
+          _probeStatus =
+              'Status received with protocol ${result.version}. '
+              'Available DP IDs: ${result.dataPoints.join(', ')}';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = friendlyError(error);
+          _probeStatus = null;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+        });
+      }
+    }
+  }
+
   Future<void> _submit({bool test = false}) async {
     if (!_form.currentState!.validate()) return;
     setState(() {
       _busy = true;
       _error = null;
+      _probeStatus = null;
     });
     try {
       final config = _config();
@@ -160,6 +208,7 @@ class _LightEditorState extends ConsumerState<LightEditor> {
               enabled: !_busy,
             ),
           DropdownButtonFormField<double>(
+            key: ValueKey(_version),
             initialValue: _version,
             decoration: const InputDecoration(labelText: 'Protocol version'),
             items: [3.1, 3.3, 3.4, 3.5]
@@ -225,6 +274,19 @@ class _LightEditorState extends ConsumerState<LightEditor> {
               ),
             ),
           const SizedBox(height: 20),
+          if (_probeStatus != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text(_probeStatus!),
+            ),
+          if (ref.watch(lightServiceProvider) is TuyaLanLightProvider) ...[
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _detectProtocol,
+              icon: const Icon(Icons.manage_search),
+              label: const Text('Detect protocol'),
+            ),
+            const SizedBox(height: 8),
+          ],
           OutlinedButton.icon(
             onPressed: _busy ? null : () => _submit(test: true),
             icon: const Icon(Icons.lan_outlined),

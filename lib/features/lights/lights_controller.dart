@@ -45,4 +45,18 @@ class LightsController extends AsyncNotifier<List<LightConfig>> {
     state = AsyncData(next);
     ref.invalidate(lightStatusProvider);
   }
+
+  Future<void> savePreset(String id, int slot, LightPreset preset) async {
+    preset.validate();
+    RangeError.checkValidIndex(slot, const [0, 1, 2]);
+    final config = (await future).firstWhere((item) => item.id == id);
+    final presets = [...config.presets];
+    presets[slot] = preset;
+    await save(
+      LightConfig.fromJson({
+        ...config.toJson(),
+        'presets': presets.map((item) => item?.toJson()).toList(),
+      }),
+    );
+  }
 }

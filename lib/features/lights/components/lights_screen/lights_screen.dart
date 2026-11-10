@@ -45,18 +45,43 @@ class LightsScreen extends ConsumerWidget {
                 }),
               );
             },
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                if (lights.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Center(child: Text('No lights added.')),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth >= 1200
+                    ? 3
+                    : constraints.maxWidth >= 760
+                    ? 2
+                    : 1;
+                final cardWidth =
+                    (constraints.maxWidth - 32 - (columns - 1) * 16) / columns;
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (lights.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Center(child: Text('No lights added.')),
+                        ),
+                      Wrap(
+                        spacing: 16,
+                        children: [
+                          for (final config in lights)
+                            SizedBox(
+                              width: cardWidth,
+                              child: LightTile(
+                                key: ValueKey(config.id),
+                                config: config,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
                   ),
-                for (final config in lights)
-                  LightTile(key: ValueKey(config.id), config: config),
-              ],
+                );
+              },
             ),
           ),
         ),

@@ -4,6 +4,49 @@ import '../../core/local_network.dart';
 
 enum DpProfile { modern, legacy, custom }
 
+class LightPreset {
+  const LightPreset({
+    required this.name,
+    required this.brightness,
+    this.temperature = 50,
+    this.hue,
+    this.saturation = 1,
+  });
+
+  final String name;
+  final double brightness, temperature, saturation;
+  final double? hue;
+
+  void validate() {
+    bool percent(double value) => value.isFinite && value >= 0 && value <= 100;
+    if (name.trim().isEmpty ||
+        !percent(brightness) ||
+        !percent(temperature) ||
+        !saturation.isFinite ||
+        saturation < 0 ||
+        saturation > 1 ||
+        (hue != null && (!hue!.isFinite || hue! < 0 || hue! > 360))) {
+      throw const HomeHubException('Check the preset name and light values.');
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'brightness': brightness,
+    'temperature': temperature,
+    'hue': hue,
+    'saturation': saturation,
+  };
+
+  factory LightPreset.fromJson(Map<String, dynamic> json) => LightPreset(
+    name: json['name'] as String,
+    brightness: (json['brightness'] as num).toDouble(),
+    temperature: (json['temperature'] as num).toDouble(),
+    hue: (json['hue'] as num?)?.toDouble(),
+    saturation: (json['saturation'] as num).toDouble(),
+  );
+}
+
 class LightConfig {
   const LightConfig({
     required this.id,
@@ -19,6 +62,7 @@ class LightConfig {
     this.colorDp,
     this.brightnessMin = 10,
     this.valueMax = 1000,
+    this.presets = const [null, null, null],
   });
 
   final String id, name, host, localKey;
@@ -26,8 +70,15 @@ class LightConfig {
   final DpProfile profile;
   final int switchDp, brightnessMin, valueMax;
   final int? modeDp, brightnessDp, temperatureDp, colorDp;
+  final List<LightPreset?> presets;
 
   void validate() {
+    if (presets.length != 3) {
+      throw const HomeHubException('Each light must have three preset slots.');
+    }
+    for (final preset in presets.whereType<LightPreset>()) {
+      preset.validate();
+    }
     requireLocalAddress(host);
     if (id.trim().isEmpty || name.trim().isEmpty) {
       throw const HomeHubException('Enter a device ID and name.');
@@ -80,6 +131,7 @@ class LightConfig {
     'colorDp': colorDp,
     'brightnessMin': brightnessMin,
     'valueMax': valueMax,
+    'presets': presets.map((preset) => preset?.toJson()).toList(),
   };
 
   factory LightConfig.fromJson(Map<String, dynamic> json) => LightConfig(
@@ -96,6 +148,17 @@ class LightConfig {
     colorDp: json['colorDp'] as int?,
     brightnessMin: json['brightnessMin'] as int,
     valueMax: json['valueMax'] as int,
+    presets: json['presets'] == null
+        ? const [null, null, null]
+        : (json['presets'] as List)
+              .map(
+                (item) => item == null
+                    ? null
+                    : LightPreset.fromJson(
+                        Map<String, dynamic>.from(item as Map),
+                      ),
+              )
+              .toList(),
   );
 }
 

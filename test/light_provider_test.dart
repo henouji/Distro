@@ -37,6 +37,54 @@ class FakeTransport implements LanTransport {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+  test('old light configurations get three empty preset slots', () {
+    final json = config.toJson()..remove('presets');
+    expect(LightConfig.fromJson(json).presets, [null, null, null]);
+  });
+  test('presets round trip and survive device edits and restarts', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    final controller = container.read(lightsProvider.notifier);
+    await controller.save(config);
+    for (var slot = 0; slot < 3; slot++) {
+      await controller.savePreset(
+        config.id,
+        slot,
+        LightPreset(
+          name: 'Preset $slot',
+          brightness: 25.0 * slot,
+          temperature: 30,
+          hue: slot == 2 ? 200 : null,
+          saturation: .6,
+        ),
+      );
+    }
+    final saved = (await container.read(lightsProvider.future)).single;
+    await controller.save(
+      LightConfig.fromJson({...saved.toJson(), 'name': 'Renamed'}),
+    );
+    final restored = ProviderContainer();
+    addTearDown(restored.dispose);
+    final light = (await restored.read(lightsProvider.future)).single;
+    expect(light.name, 'Renamed');
+    expect(light.presets, hasLength(3));
+    expect(light.presets[2]!.hue, 200);
+    expect(light.presets[2]!.saturation, .6);
+    expect(light.presets[2]!.brightness, 50);
+    expect(light.presets[0]!.temperature, 30);
+    expect(
+      () => const LightPreset(name: '', brightness: 50).validate(),
+      throwsA(isA<HomeHubException>()),
+    );
+    await expectLater(
+      controller.savePreset(
+        config.id,
+        3,
+        const LightPreset(name: 'Invalid slot', brightness: 50),
+      ),
+      throwsRangeError,
+    );
+  });
   test('only private IPv4 device destinations are accepted', () {
     for (final host in [
       '192.168.0.2',
@@ -69,6 +117,62 @@ void main() {
     expect(state.hasColor, isFalse);
     expect(transport.closed, isTrue);
   });
+  test(
+    'detect protocol with status only, independently of configured DP mapping',
+    () async {
+      final attempts = <double>[];
+      final transports = <FakeTransport>[];
+      final provider = TuyaLanLightProvider(
+        createTransport: (candidate) {
+          attempts.add(candidate.version);
+          final transport = FakeTransport()
+            ..response = candidate.version == 3.5
+                ? {
+                    'dps': {'1': true, '3': 50},
+                  }
+                : {'Error': 'response timeout'};
+          transports.add(transport);
+          return transport;
+        },
+      );
+      final result = await provider.detectProtocol(config);
+      expect(attempts, [3.3, 3.5]);
+      expect(result.version, 3.5);
+      expect(result.dataPoints, [1, 3]);
+      expect(
+        transports.every(
+          (transport) => transport.closed && transport.writes.isEmpty,
+        ),
+        isTrue,
+      );
+    },
+  );
+  test(
+    'protocol detection rejects ACK-only replies and sanitizes failures',
+    () async {
+      final attempts = <double>[];
+      final provider = TuyaLanLightProvider(
+        createTransport: (candidate) {
+          attempts.add(candidate.version);
+          return FakeTransport()..response = {'success': true};
+        },
+      );
+      await expectLater(
+        provider.detectProtocol(config),
+        throwsA(
+          isA<HomeHubException>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('No supported protocol'),
+              isNot(contains(config.localKey)),
+            ),
+          ),
+        ),
+      );
+      expect(attempts, [3.3, 3.5, 3.4, 3.1]);
+    },
+  );
   test('brightness selects white mode and scales to v2 range', () async {
     final transport = FakeTransport();
     final provider = TuyaLanLightProvider(createTransport: (_) => transport);
@@ -102,6 +206,48 @@ void main() {
       throwsA(isA<HomeHubException>()),
     );
     expect(transport.closed, isTrue);
+  });
+  test('classify LAN failures without exposing raw errors or credentials', () {
+    final cases = <String, String>{
+      'Unable to connect to device after 1 attempts':
+          'Cannot open the local connection',
+      'TimeoutException: response timeout': 'The bulb did not reply in time',
+      'Session key negotiation failed': 'Tuya session handshake failed',
+      'Invalid padding during decrypt': 'Cannot decode the bulb response',
+      'FormatException: invalid JSON': 'Cannot decode the bulb response',
+      'unexpected private response': 'The cause is not yet identified',
+    };
+    for (final entry in cases.entries) {
+      try {
+        TuyaLanLightProvider.checkResponse({
+          'Error': '${entry.key}: ${config.localKey}',
+        });
+        fail('Expected a sanitized LAN error');
+      } on HomeHubException catch (error) {
+        expect(error.message, contains(entry.value));
+        expect(error.message, isNot(contains(config.localKey)));
+        expect(error.message, isNot(contains('unexpected private response')));
+      }
+    }
+  });
+  test('classify numeric LAN error codes', () {
+    for (final entry in {
+      901: 'Cannot open the local connection',
+      905: 'Cannot open the local connection',
+      902: 'The bulb did not reply in time',
+      914: 'Cannot decode the bulb response',
+    }.entries) {
+      expect(
+        () => TuyaLanLightProvider.checkResponse({'Err': '${entry.key}'}),
+        throwsA(
+          isA<HomeHubException>().having(
+            (error) => error.message,
+            'message',
+            contains(entry.value),
+          ),
+        ),
+      );
+    }
   });
   test('invalid destination never creates a transport', () async {
     var created = false;

@@ -87,28 +87,99 @@ class TuyaLanLightProvider implements LightProvider {
     if (response.containsKey('Error') ||
         response.containsKey('Err') ||
         response['success'] == false) {
+      final code = int.tryParse('${response['Err']}');
+      final description = '${response['Error'] ?? ''}'.toLowerCase();
+      if (code == 901 ||
+          code == 905 ||
+          description.contains('unable to connect') ||
+          description.contains('connection refused') ||
+          description.contains('network is unreachable')) {
+        throw const HomeHubException(
+          'Cannot open the local connection. Check the bulb IP and home Wi-Fi, '
+          'and force-stop Smart Life before retrying.',
+        );
+      }
+      if (code == 902 ||
+          description.contains('timeout') ||
+          description.contains('timed out')) {
+        throw const HomeHubException(
+          'The bulb did not reply in time. Close other Tuya clients and verify '
+          'the protocol version advertised by the bulb.',
+        );
+      }
+      if (description.contains('session key negotiation')) {
+        throw const HomeHubException(
+          'Tuya session handshake failed. Verify the bulb protocol version and '
+          'that the current local key belongs to this device ID.',
+        );
+      }
+      if (code == 914 ||
+          code == 900 ||
+          description.contains('decrypt') ||
+          description.contains('padding') ||
+          description.contains('authentication') ||
+          description.contains('json')) {
+        throw const HomeHubException(
+          'Cannot decode the bulb response. Verify its protocol version and '
+          'local key before changing DP mappings.',
+        );
+      }
       throw const HomeHubException(
-        'The light rejected the request. Check the local key, protocol version and DP mapping.',
+        'The Tuya LAN request failed. The cause is not yet identified. '
+        'Verify the protocol version and current local key; this does not '
+        'confirm a DP mapping problem.',
       );
     }
   }
 
   @override
-  Future<LightState> read(LightConfig config) => _run(config, (
-    transport,
-  ) async {
+  Future<LightState> read(LightConfig config) =>
+      _run(config, (transport) async {
+        return LightState.fromDps(config, await _readDps(transport));
+      });
+
+  Future<Map<String, dynamic>> _readDps(LanTransport transport) async {
     final response = await transport.status();
     checkResponse(response);
     final data =
         response['dps'] ??
         (response['data'] is Map ? response['data']['dps'] : null);
-    if (data is! Map) {
+    if (data is! Map || data.isEmpty) {
       throw const HomeHubException(
         'The light returned no status. Check its protocol version and local key.',
       );
     }
-    return LightState.fromDps(config, Map<String, dynamic>.from(data));
-  });
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<({double version, List<int> dataPoints})> detectProtocol(
+    LightConfig config, {
+    void Function(double version)? onAttempt,
+  }) async {
+    config.validate();
+    for (final version in {config.version, 3.5, 3.4, 3.3, 3.1}) {
+      onAttempt?.call(version);
+      final candidate = LightConfig.fromJson({
+        ...config.toJson(),
+        'version': version,
+      });
+      try {
+        final points = await _run(candidate, _readDps);
+        return (
+          version: version,
+          dataPoints: points.keys.map(int.tryParse).whereType<int>().toList()
+            ..sort(),
+        );
+      } on HomeHubException {
+        continue;
+      }
+    }
+    throw const HomeHubException(
+      'No supported protocol returned valid status. Check that the current '
+      'local key, device ID and IP belong to the same bulb. Close Tuya clients '
+      'on other phones. No light commands were sent.',
+    );
+  }
 
   Future<void> _write(LightConfig config, Map<int, Object> values) =>
       _run(config, (transport) async {

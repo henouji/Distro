@@ -16,6 +16,14 @@
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "build"
+		},
+		{
+			"label": "HomeHub: Build Diagnostic APK",
+			"type": "shell",
+			"command": "& \"$env:LOCALAPPDATA\\HomeHubToolchains\\flutter\\bin\\flutter.bat\" build apk --debug --no-pub",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
 		}
 	]
 }

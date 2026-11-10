@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/components/feedback.dart';
+import '../../../core/components/glass.dart';
 import '../../../core/local_network.dart';
 import '../light.dart';
 import '../light_provider.dart';
 import '../lights_controller.dart';
+import 'color_wheel.dart';
 import 'light_editor.dart';
+import 'light_preset_editor.dart';
 
 class LightTile extends ConsumerStatefulWidget {
   const LightTile({super.key, required this.config});
@@ -18,6 +21,60 @@ class LightTile extends ConsumerStatefulWidget {
 class _LightTileState extends ConsumerState<LightTile> {
   bool _busy = false;
   double? _brightness, _temperature;
+
+  Future<void> _editPreset(int slot) async {
+    final preset = await showDialog<LightPreset>(
+      context: context,
+      builder: (_) => LightPresetEditor(
+        config: widget.config,
+        slot: slot,
+        initial: widget.config.presets[slot],
+      ),
+    );
+    if (preset == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await ref
+          .read(lightsProvider.notifier)
+          .savePreset(widget.config.id, slot, preset);
+    } catch (error) {
+      if (mounted) showMessage(context, friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _applyPreset(LightPreset preset, LightState light) => _command((
+    provider,
+  ) async {
+    if (preset.hue != null && !light.hasColor) {
+      throw const HomeHubException(
+        'This color preset is not supported. Edit the preset or DP mapping.',
+      );
+    }
+    if (preset.hue != null) {
+      final color = HSVColor.fromAHSV(
+        1,
+        preset.hue!,
+        preset.saturation,
+        preset.brightness / 100,
+      ).toColor();
+      await provider.setColor(
+        widget.config,
+        (color.r * 255).round(),
+        (color.g * 255).round(),
+        (color.b * 255).round(),
+      );
+    } else {
+      if (light.hasTemperature) {
+        await provider.setTemperature(widget.config, preset.temperature);
+      }
+      if (light.hasBrightness) {
+        await provider.setBrightness(widget.config, preset.brightness);
+      }
+    }
+    await provider.setPower(widget.config, true);
+  });
 
   Future<void> _command(Future<void> Function(LightProvider) action) async {
     setState(() {
@@ -50,21 +107,65 @@ class _LightTileState extends ConsumerState<LightTile> {
           final color = HSVColor.fromAHSV(1, hue, saturation, value).toColor();
           return AlertDialog(
             title: const Text('Light Color'),
+            scrollable: true,
             content: SizedBox(
               width: 280,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  ColorWheel(
+                    color: HSVColor.fromAHSV(1, hue, saturation, value),
+                    onChanged: (next) => update(() {
+                      hue = next.hue;
+                      saturation = next.saturation;
+                    }),
+                  ),
+                  const SizedBox(height: 16),
                   SizedBox(
                     height: 48,
                     width: double.infinity,
-                    child: ColoredBox(color: color),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      for (final preset in [
+                        (0.0, 'Red'),
+                        (45.0, 'Amber'),
+                        (130.0, 'Green'),
+                        (210.0, 'Blue'),
+                      ])
+                        IconButton(
+                          tooltip: preset.$2,
+                          onPressed: () => update(() {
+                            hue = preset.$1;
+                            saturation = 1;
+                          }),
+                          icon: Icon(
+                            Icons.circle,
+                            color: HSVColor.fromAHSV(
+                              1,
+                              preset.$1,
+                              1,
+                              1,
+                            ).toColor(),
+                          ),
+                        ),
+                    ],
+                  ),
                   const Text('Hue'),
                   Slider(
                     value: hue,
                     max: 360,
+                    label: '${hue.round()} degrees',
+                    semanticFormatterCallback: (value) =>
+                        '${value.round()} degrees hue',
                     onChanged: (next) => update(() {
                       hue = next;
                     }),
@@ -72,6 +173,9 @@ class _LightTileState extends ConsumerState<LightTile> {
                   const Text('Saturation'),
                   Slider(
                     value: saturation,
+                    label: '${(saturation * 100).round()}%',
+                    semanticFormatterCallback: (value) =>
+                        '${(value * 100).round()} percent saturation',
                     onChanged: (next) => update(() {
                       saturation = next;
                     }),
@@ -79,6 +183,9 @@ class _LightTileState extends ConsumerState<LightTile> {
                   const Text('Brightness'),
                   Slider(
                     value: value,
+                    label: '${(value * 100).round()}%',
+                    semanticFormatterCallback: (value) =>
+                        '${(value * 100).round()} percent brightness',
                     onChanged: (next) => update(() {
                       value = next;
                     }),
@@ -119,7 +226,8 @@ class _LightTileState extends ConsumerState<LightTile> {
     final online = light?.online ?? false;
     final enabled = online && !_busy;
     final slidersEnabled = enabled && light!.on;
-    return Card(
+    return GlassPanel(
+      padding: EdgeInsets.zero,
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -208,6 +316,9 @@ class _LightTileState extends ConsumerState<LightTile> {
               const SizedBox(height: 12),
               Text('Brightness ${(_brightness ?? light!.brightness).round()}%'),
               Slider(
+                semanticFormatterCallback: (value) =>
+                    '${value.round()} percent brightness',
+                label: '${(_brightness ?? light!.brightness).round()}%',
                 value: _brightness ?? light!.brightness,
                 max: 100,
                 onChanged: slidersEnabled
@@ -228,6 +339,9 @@ class _LightTileState extends ConsumerState<LightTile> {
                 'Color Temperature ${(_temperature ?? light!.temperature).round()}%',
               ),
               Slider(
+                semanticFormatterCallback: (value) =>
+                    '${value.round()} percent from warm to cool',
+                label: '${(_temperature ?? light!.temperature).round()}%',
                 value: _temperature ?? light!.temperature,
                 max: 100,
                 onChanged: slidersEnabled
@@ -242,17 +356,79 @@ class _LightTileState extends ConsumerState<LightTile> {
                       )
                     : null,
               ),
-              const Row(
+              Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [Text('Warm'), Text('Cool')],
+                children: [
+                  Text(
+                    'Warm',
+                    style: TextStyle(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFFEDB86A)
+                          : const Color(0xFF8C5015),
+                    ),
+                  ),
+                  Text(
+                    'Cool',
+                    style: TextStyle(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFFA4C9FF)
+                          : const Color(0xFF31669B),
+                    ),
+                  ),
+                ],
               ),
             ],
             if (light?.hasColor ?? false)
-              IconButton(
-                onPressed: slidersEnabled ? _color : null,
-                tooltip: 'Choose light color',
-                icon: const Icon(Icons.palette_outlined),
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: OutlinedButton.icon(
+                  onPressed: slidersEnabled ? _color : null,
+                  icon: const Icon(Icons.palette_outlined),
+                  label: const Text('Choose light color'),
+                ),
               ),
+            const SizedBox(height: 16),
+            const Text('Presets'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (var slot = 0; slot < 3; slot++)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 160),
+                        child: OutlinedButton(
+                          onPressed: _busy
+                              ? null
+                              : widget.config.presets[slot] == null
+                              ? () => _editPreset(slot)
+                              : enabled
+                              ? () => _applyPreset(
+                                  widget.config.presets[slot]!,
+                                  light!,
+                                )
+                              : null,
+                          child: Text(
+                            widget.config.presets[slot]?.name ??
+                                'Set preset ${slot + 1}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      if (widget.config.presets[slot] != null)
+                        IconButton(
+                          tooltip: 'Edit preset ${slot + 1}',
+                          onPressed: _busy ? null : () => _editPreset(slot),
+                          icon: const Icon(Icons.edit_outlined, size: 20),
+                        ),
+                    ],
+                  ),
+              ],
+            ),
             if (_busy) const LinearProgressIndicator(),
           ],
         ),

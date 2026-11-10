@@ -3,6 +3,84 @@
 Android app for direct Tuya Wi-Fi light control and local Tapo RTSP viewing.
 Flutter stable, Material 3, Riverpod, Android 7.0+ (minSdk 24).
 
+## Tablet Command Center
+
+The interface uses translucent, blurred glass panels with light and dark themes.
+At 760 logical pixels and wider, navigation moves to a persistent side rail;
+wide dashboards show cameras and lighting side by side. Smaller screens retain
+bottom navigation and a scrollable single-column layout. Lighting cards form a
+responsive grid with touch-sized controls. No remote images or fonts are loaded.
+
+Light cards expose brightness, warm-to-cool white temperature and a color picker
+with a touch color wheel, brightness slider, precise hue/saturation sliders and
+color shortcuts, when supported by the bulb's
+configured data points. Temperature remains a normalized percentage: no Kelvin
+range is assumed. The FSB109CD is tunable white, not RGB.
+
+## TV Sync
+
+Install HomeHub on an Android / Google TV (for example a Xiaomi A Pro) and open
+the **TV** tab to make a light follow what is on screen. Choose a light,
+press **Start TV Sync** and accept Android's screen-capture prompt, then press
+Home and play something; the light keeps following in the background while
+a "TV Sync is running" notification is active.
+
+- The TV's own screen is mirrored into a 64-pixel-wide virtual display
+  (MediaProjection in a `mediaProjection` foreground service). Letterbox bars
+  are ignored; vivid pixels define the color and average luma the brightness.
+  Frames are processed on the TV; nothing leaves the local network.
+- Color bulbs (color and mode DPs configured) follow hue, saturation and
+  brightness. Tunable-white bulbs such as the FSB109CD follow brightness and
+  shift warmer or cooler with the picture.
+- Brightness rises quickly and fades more slowly so the light "breathes"
+  rather than flickers. Darkest/brightest brightness and smoothness are
+  adjustable. Color sampling and light updates are capped at 5 per second
+  by default to reduce playback load, over one persistent
+  Tuya LAN connection. Sync uses individual DP writes, matching the normal
+  light controls; the Tuya library's bulk-write helper nests the payload
+  incorrectly and is not used.
+- Use a release build on the TV (`flutter build apk --release`), not a debug
+  build, to avoid development overhead during playback. Screen mirroring
+  still uses TV graphics resources and can cause stutter on some TVs; stop
+  sync if playback is affected. The sampling cap limits color processing,
+  not the TV compositor's mirroring rate.
+- When sync stops, the light's previous power, brightness and temperature are
+  restored. While syncing, other Tuya clients cannot reach the bulb.
+- DRM-protected apps (Netflix, Disney+ and similar) usually capture as black,
+  so the light stays at the darkest setting during them. Expect a few hundred
+  milliseconds of lag from capture plus the bulb's own fade.
+
+### Control the TV from a tablet
+
+The **TV** tab shows TV Sync on a TV and a remote control on tablets/phones.
+
+1. On the TV, open HomeHub → **TV** and turn on **Tablet control**. It shows
+   the TV's IP address and a 6-digit pairing code.
+2. On the tablet, open HomeHub → **TV**, enter the IP and code, and press
+   **Pair**.
+3. The tablet now shows what is playing on the TV, lists the TV's apps (tap
+   one to open it), and has a **Light Sync** switch, light picker and sliders.
+   **Send my lights to the TV** copies the tablet's light setup to the TV.
+
+Grant these once over adb (Wi-Fi debugging) so remote control works while
+another app is in front on the TV:
+
+```powershell
+adb -s <tv-ip>:5555 shell appops set com.homehub.homehub SYSTEM_ALERT_WINDOW allow  # open apps / start sync from the background
+adb -s <tv-ip>:5555 shell appops set com.homehub.homehub GET_USAGE_STATS allow      # report the app that is playing
+adb -s <tv-ip>:5555 shell appops set com.homehub.homehub PROJECT_MEDIA allow        # skip the capture prompt (may be ignored by some TV firmware)
+```
+
+- The TV listens on port 47870 and only answers private-network addresses.
+  Pairing issues a random token; the TV stores only its SHA-256 hash.
+  **Forget paired tablets** on the TV revokes every tablet.
+- Traffic is plain HTTP on your LAN, like the cameras' RTSP: anyone on the
+  home Wi-Fi could read the token or the light keys sent by **Send my lights**.
+- The server runs inside HomeHub on the TV. While Tablet control or sync is on,
+  Back on the TV sends HomeHub to the background instead of closing it, but
+  Android can still stop a backgrounded app; reopen HomeHub on the TV if the
+  tablet cannot reach it.
+
 ## Local-Only Architecture
 
 This implementation follows the approved change from Tuya Cloud OpenAPI to
@@ -14,8 +92,9 @@ Public addresses, DNS names, IPv6 and arbitrary RTSP paths are rejected.
 
 Lights use the published Dart `tinytuya` LAN client over TCP 6668; cameras use
 `media_kit` over RTSP/TCP. The LAN client library also offers a cloud API, but
-HomeHub never instantiates it. There are no application HTTP requests, so Dio
-is not needed after the architecture change. Development, package downloads
+HomeHub never instantiates it. Opt-in camera movement uses authenticated ONVIF
+SOAP over local HTTP on the configured camera port (C200 default: 2020).
+Development, package downloads
 and GitHub builds require internet; normal device management does not.
 
 **This is not a network firewall.** Android's INTERNET permission is also
@@ -27,8 +106,9 @@ traffic, and verify operation with internet disconnected. Do not port-forward
 RTSP or Tuya ports. Use a trusted home network; RTSP is not encrypted.
 
 All light local keys and camera credentials/configuration are stored using
-`flutter_secure_storage` with encrypted Android preferences. Only theme and
-preview settings go into `shared_preferences`. Android app backup is disabled.
+`flutter_secure_storage` with encrypted Android preferences. Only theme, preview
+and TV Sync (selected light ID and slider) settings go into
+`shared_preferences`. Android app backup is disabled.
 Uninstalling or clearing app data removes configuration. There are no default
 credentials. Never commit device key files or publish native playback logs.
 
@@ -97,6 +177,19 @@ and temperature controls select white mode when a mode DP is configured. Color
 selects colour mode. Commands are sent on slider release, serialized per bulb,
 and followed by a status refresh. Unsupported controls are hidden. Pull down
 to refresh or use Retry on an offline light. The options menu edits/deletes it.
+In **Choose light color**, tap or drag around the wheel to select hue and move
+toward its center for less saturation. Adjust **Brightness**, then tap **Apply**
+to send the chosen color and brightness together. Wheel, slider and shortcut
+changes stay local until Apply; Cancel leaves the bulb unchanged. The brightness
+slider on the light card controls white-mode brightness.
+
+Each light has exactly three user-configurable preset slots, visible on its
+dashboard and Lights cards. Tap **Set preset** to name a slot and choose white
+temperature/brightness or RGB color/brightness (where configured). **Save preset**
+stores it locally without changing the bulb. Tap its name to apply it and turn
+the light on; use its pencil button to edit it. Presets survive app restarts and
+device-configuration edits. Offline lights cannot apply presets, but their
+presets can still be edited. Tunable-white bulbs do not offer RGB presets.
 
 LAN uses numeric DP IDs, not Cloud API names such as `switch_led`,
 `bright_value_v2` or `colour_data_v2`. Legacy/modern/custom mappings replace
@@ -171,13 +264,53 @@ screen. Reduce concurrent camera load by disabling live previews in Settings.
 Camera firmware may limit concurrent sessions; HomeHub releases previews when
 opening the full-screen route. Many previews can still strain a phone/camera.
 
-**TODO: ONVIF PTZ.** Controls are intentionally absent. A future implementation
-must authenticate against local port 2020, discover media/PTZ profiles and
-capabilities, and implement ContinuousMove plus reliable Stop on release,
-timeout and lifecycle changes. Do not display PTZ for unsupported fixed cameras.
+### C200 Pitch / Yaw
+
+Edit the C200 camera and enable **ONVIF pan / tilt**, leaving ONVIF port at 2020
+unless your configuration differs. Existing cameras remain view-only until this
+is explicitly enabled. Open the camera and tap **Connect controls**. HomeHub
+reads the camera clock, authenticates with WS-Security UsernameToken digest,
+discovers media/PTZ services and selects a PTZ-capable profile. No TP-Link cloud
+account is used. Returned service addresses must match the configured private IP
+and ONVIF port; redirects and proxy routing are disabled.
+SOAP requests use an explicit UTF-8 content length because some camera firmware
+closes connections when given chunked request bodies.
+
+Use the arrows for pitch (up/down) and yaw (left/right). Each tap requests a
+short continuous movement, followed by Stop after 250 ms. A one-second
+camera-side timeout limits motion if the app is backgrounded or connectivity
+fails. Stop movement is also available while a command is in flight. These are
+relative directional controls, not absolute degree sliders: no measured angle,
+home position or calibration is assumed. Errors are displayed in the panel.
+Tablet landscape places controls alongside video; narrow layouts stack them.
+
+This implementation has automated protocol tests but is not physically verified
+against a C200. Firmware must support ONVIF continuous pan/tilt and its timeout.
+If connection or movement is rejected, check the dedicated camera account,
+third-party access settings, firmware, camera time and LAN reachability.
+See [TP-Link's RTSP/ONVIF guide](https://www.tp-link.com/us/support/faq/2680/).
+Local HTTP/RTSP is not encrypted; use a trusted network and block WAN access
+at your router if required.
 
 ## Troubleshooting
 
+- In the light editor, Detect protocol tries the selected version followed by
+	other supported versions using read-only local status requests. Allow up to
+	about a minute. A valid status response selects that version and displays
+	numeric DP IDs without exposing the key or sending light commands. Review
+	the mapping, Test connection, then Save Light. It does not retrieve a key or
+	guarantee that control commands work; older 3.1 status reads may not validate
+	the key. If detection fails, key/ID/IP mismatch or unsupported firmware remain
+	possible causes.
+- For key-free LAN discovery from this project, run
+	`dart run tool/discover_lights.dart`. It listens for Tuya advertisements and
+	prints only private IPs, device IDs, protocol versions and MAC addresses.
+	It does not retrieve keys or contact Tuya Cloud. No advertisements can also
+	mean UDP discovery is blocked; it does not establish lack of LAN support.
+- Updated builds distinguish local connection failures, response timeouts,
+	session-handshake failures and response-decoding failures. These are
+	diagnostic categories, not proof of a particular root cause. A generic
+	request failure does not establish that the DP mapping is wrong.
 - Light offline: check power, reserved IP, key, actual protocol version and DP
   mapping. Close competing Tuya clients. LAN support is firmware-dependent.
 - Wrong local key: obtain the current key after re-pairing. HomeHub never
@@ -216,8 +349,10 @@ android/                  # Android-only Flutter host and Gradle wrapper
 ```
 
 Tests cover address restrictions, URL escaping, stream choice, DP scaling,
-RGB encoding, secure configuration CRUD, adapter errors/cleanup and phone-width
-navigation/forms/theme persistence.
+RGB encoding, secure configuration CRUD, adapter errors/cleanup, phone/tablet
+navigation, forms/theme persistence, slider-release commands and RGB selection.
+ONVIF tests cover digest authentication, clock alignment, service/profile
+discovery, destination restrictions, bounded movement, Stop and error handling.
 They do not emulate real Tuya firmware or native Android RTSP decoding.
 Validate both integrations on physical devices with WAN blocked before relying
 on local-only operation. No physical bulb or camera has been tested here.

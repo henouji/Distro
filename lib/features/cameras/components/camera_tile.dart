@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/components/feedback.dart';
+import '../../../core/components/glass.dart';
 import '../../../core/local_network.dart';
 import '../../settings/settings_controller.dart';
 import '../camera.dart';
@@ -44,9 +45,8 @@ class _CameraTileState extends ConsumerState<CameraTile> {
   @override
   Widget build(BuildContext context) {
     final preview = ref.watch(settingsProvider).livePreviews;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      margin: EdgeInsets.zero,
+    return GlassPanel(
+      padding: EdgeInsets.zero,
       child: Column(
         children: [
           Expanded(
@@ -63,7 +63,7 @@ class _CameraTileState extends ConsumerState<CameraTile> {
                     )
                   else
                     const ColoredBox(
-                      color: Colors.black,
+                      color: Color(0xFF142834),
                       child: Center(
                         child: Icon(
                           Icons.videocam_outlined,
@@ -99,6 +99,12 @@ class _CameraTileState extends ConsumerState<CameraTile> {
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                   ),
+                  if (widget.camera.panTilt)
+                    IconButton(
+                      tooltip: 'Pan / tilt ${widget.camera.name}',
+                      onPressed: _open,
+                      icon: const Icon(Icons.control_camera),
+                    ),
                   PopupMenuButton<String>(
                     tooltip: 'Camera options',
                     onSelected: (action) async {
@@ -141,11 +147,14 @@ class CameraGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final columns = constraints.maxWidth < 600
+      final preferred = constraints.maxWidth < 600
           ? 1
           : constraints.maxWidth < 1000
           ? 2
           : 3;
+      final columns = cameras.isNotEmpty && cameras.length < preferred
+          ? cameras.length
+          : preferred;
       return GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),

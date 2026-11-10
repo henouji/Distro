@@ -11,11 +11,15 @@ class CameraConfig {
     required this.password,
     this.port = 554,
     this.stream = CameraStream.stream1,
+    this.panTilt = false,
+    this.onvifPort = 2020,
   });
 
   final String id, name, host, username, password;
   final int port;
   final CameraStream stream;
+  final bool panTilt;
+  final int onvifPort;
 
   void validate() {
     requireLocalAddress(host);
@@ -26,6 +30,9 @@ class CameraConfig {
     }
     if (port < 1 || port > 65535) {
       throw const HomeHubException('RTSP port must be between 1 and 65535.');
+    }
+    if (panTilt && (onvifPort < 1 || onvifPort > 65535)) {
+      throw const HomeHubException('ONVIF port must be between 1 and 65535.');
     }
   }
 
@@ -43,6 +50,8 @@ class CameraConfig {
     'password': password,
     'port': port,
     'stream': stream.name,
+    'panTilt': panTilt,
+    'onvifPort': onvifPort,
   };
 
   factory CameraConfig.fromJson(Map<String, dynamic> json) => CameraConfig(
@@ -53,5 +62,7 @@ class CameraConfig {
     password: json['password'] as String,
     port: json['port'] as int,
     stream: CameraStream.values.byName(json['stream'] as String),
+    panTilt: json['panTilt'] as bool? ?? false,
+    onvifPort: json['onvifPort'] as int? ?? 2020,
   );
 }
