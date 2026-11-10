@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "HomeHub: Install Java 17",
+			"type": "shell",
+			"command": "& { $ErrorActionPreference = 'Stop'; $destination = Join-Path $env:LOCALAPPDATA 'HomeHubToolchains\\java17'; $jdk = Get-ChildItem $destination -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'bin\\java.exe') } | Select-Object -First 1; if (-not $jdk) { $release = (Invoke-RestMethod 'https://api.adoptium.net/v3/assets/latest/17/hotspot?architecture=x64&image_type=jdk&os=windows&vendor=eclipse')[0]; $package = $release.binary.package; $archive = Join-Path $env:TEMP 'homehub-temurin17-task.zip'; & curl.exe --fail --location --retry 3 --output $archive $package.link; if ($LASTEXITCODE -ne 0) { throw 'Java download failed.' }; if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $package.checksum) { throw 'Java archive checksum mismatch.' }; Expand-Archive -Path $archive -DestinationPath $destination; $jdk = Get-ChildItem $destination -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'bin\\java.exe') } | Select-Object -First 1 }; if (-not $jdk) { throw 'JDK installation failed.' }; & (Join-Path $jdk.FullName 'bin\\java.exe') -version; if ($LASTEXITCODE -ne 0) { throw 'Java validation failed.' }; & \"$env:LOCALAPPDATA\\HomeHubToolchains\\flutter\\bin\\flutter.bat\" config --jdk-dir $jdk.FullName }",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "HomeHub: Build Debug APK",
+			"type": "shell",
+			"command": "& \"$env:LOCALAPPDATA\\HomeHubToolchains\\flutter\\bin\\flutter.bat\" build apk --debug",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
