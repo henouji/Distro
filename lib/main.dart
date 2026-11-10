@@ -5,6 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/app.dart';
 import 'core/storage.dart';
+import 'features/lights/lighting_runtime.dart';
+
+@pragma('vm:entry-point')
+Future<void> lightingMain() => runLightingService();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

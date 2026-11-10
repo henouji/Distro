@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/storage.dart';
+import '../../core/local_network.dart';
+import '../tv_sync/tv_sync_controller.dart';
 import 'light.dart';
 import 'light_provider.dart';
 
@@ -25,6 +27,15 @@ class LightsController extends AsyncNotifier<List<LightConfig>> {
 
   Future<void> save(LightConfig config, {String? previousId}) async {
     config.validate();
+    if (config.schedule?.enabled == true && ref.read(tvSyncProvider.exists)) {
+      final sync = ref.read(tvSyncProvider);
+      if (sync.status != TvSyncStatus.idle &&
+          (sync.lightId == config.id || sync.lightId == previousId)) {
+        throw const HomeHubException(
+          'Stop TV Sync before enabling a schedule for this light.',
+        );
+      }
+    }
     final current = await future;
     final next = [
       ...current.where((item) => item.id != config.id && item.id != previousId),

@@ -179,6 +179,159 @@ void main() {
     await provider.setBrightness(config, 50);
     expect(transport.writes, {21: 'white', 22: 505});
   });
+  test(
+    'scheduled white uses one connection and individual DP writes',
+    () async {
+      final transport = FakeTransport();
+      var connections = 0;
+      final provider = TuyaLanLightProvider(
+        createTransport: (_) {
+          connections++;
+          return transport;
+        },
+      );
+      await provider.setScheduledWhite(config, 50, 25);
+      expect(connections, 1);
+      expect(transport.writes, {21: 'white', 23: 250, 22: 505, 20: true});
+      expect(transport.closed, isTrue);
+    },
+  );
+  test('notification toggles power based on fresh bulb status', () async {
+    final transport = FakeTransport();
+    final info = await TuyaLanLightProvider(
+      createTransport: (_) => transport,
+    ).quickControl(config, 'toggle');
+    expect(transport.writes, {20: false});
+    expect(info['on'], isFalse);
+    expect(info['name'], config.name);
+    expect(transport.closed, isTrue);
+  });
+  test('notification adjusts white brightness and temperature', () async {
+    for (final (action, expected) in [
+      ('dim', {21: 'white', 22: 406, 20: true}),
+      ('brighten', {21: 'white', 22: 604, 20: true}),
+      ('warm', {21: 'white', 23: 0, 20: true}),
+      ('cool', {21: 'white', 23: 1000, 20: true}),
+    ]) {
+      final transport = FakeTransport();
+      await TuyaLanLightProvider(
+        createTransport: (_) => transport,
+      ).quickControl(config, action);
+      expect(transport.writes, expected);
+    }
+  });
+  test(
+    'notification colors preserve brightness and dim without changing hue',
+    () async {
+      final rgb = LightConfig.fromJson({...config.toJson(), 'colorDp': 24});
+      final transport = FakeTransport()
+        ..response = {
+          'dps': {
+            '20': true,
+            '21': 'colour',
+            '22': 505,
+            '23': 500,
+            '24': '00d203e801f4',
+          },
+        };
+      final provider = TuyaLanLightProvider(createTransport: (_) => transport);
+      final dimmed = await provider.quickControl(rgb, 'dim');
+      expect(transport.writes, {24: '00d203e80190', 20: true});
+      expect(dimmed['brightness'], 40);
+      expect(dimmed['hasColor'], isTrue);
+      transport.writes.clear();
+      final red = await provider.quickControl(rgb, 'red');
+      expect(transport.writes, {21: 'colour', 24: '000003e801f4', 20: true});
+      expect(red['brightness'], 50);
+    },
+  );
+  test('compact notification cycles colors from current bulb state', () async {
+    final rgb = LightConfig.fromJson({...config.toJson(), 'colorDp': 24});
+    final transport = FakeTransport();
+    final provider = TuyaLanLightProvider(createTransport: (_) => transport);
+    transport.response = {
+      'dps': {
+        '20': true,
+        '21': 'white',
+        '22': 505,
+        '23': 500,
+        '24': '000003e801f4',
+      },
+    };
+    for (final expectedColor in [
+      '000003e801f4', // Red from white.
+      '002d03e801f4',
+      '008203e801f4',
+      '00d203e801f4',
+      '000003e801f4',
+    ]) {
+      transport.writes.clear();
+      final info = await provider.quickControl(rgb, 'color');
+      expect(transport.writes, {21: 'colour', 24: expectedColor, 20: true});
+      expect(info['brightness'], 50);
+      transport.response = {
+        'dps': {
+          '20': true,
+          '21': 'colour',
+          '22': 505,
+          '23': 500,
+          '24': expectedColor,
+        },
+      };
+    }
+  });
+  test(
+    'compact white alternates warm and cool and leaves color mode',
+    () async {
+      final rgb = LightConfig.fromJson({...config.toJson(), 'colorDp': 24});
+      for (final (mode, temperature, expected) in [
+        ('white', 500, 0),
+        ('white', 0, 1000),
+        ('white', 1000, 0),
+        ('colour', 0, 0),
+      ]) {
+        final transport = FakeTransport()
+          ..response = {
+            'dps': {
+              '20': true,
+              '21': mode,
+              '22': 505,
+              '23': temperature,
+              '24': '00d203e801f4',
+            },
+          };
+        await TuyaLanLightProvider(
+          createTransport: (_) => transport,
+        ).quickControl(rgb, 'white');
+        expect(transport.writes, {21: 'white', 23: expected, 20: true});
+      }
+    },
+  );
+  test(
+    'notification rejects unsupported controls and invalid color without writing',
+    () async {
+      final transport = FakeTransport();
+      final provider = TuyaLanLightProvider(createTransport: (_) => transport);
+      for (final action in ['red', 'color', 'invalid']) {
+        await expectLater(
+          provider.quickControl(config, action),
+          throwsA(isA<HomeHubException>()),
+        );
+        expect(transport.writes, isEmpty);
+      }
+      final rgb = LightConfig.fromJson({...config.toJson(), 'colorDp': 24});
+      for (final value in ['invalid', 'ffff03e803e8']) {
+        transport.response = {
+          'dps': {'20': true, '21': 'colour', '24': value},
+        };
+        await expectLater(
+          provider.quickControl(rgb, 'dim'),
+          throwsA(isA<HomeHubException>()),
+        );
+        expect(transport.writes, isEmpty);
+      }
+    },
+  );
   test('legacy mapping uses legacy brightness range', () async {
     const legacy = LightConfig(
       id: 'test',

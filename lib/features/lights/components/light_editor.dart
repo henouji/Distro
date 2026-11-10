@@ -81,6 +81,7 @@ class _LightEditorState extends ConsumerState<LightEditor> {
     brightnessMin: _optionalInt('Brightness minimum') ?? -1,
     valueMax: _optionalInt('Value maximum') ?? 0,
     presets: widget.config?.presets ?? const [null, null, null],
+    schedule: widget.config?.schedule,
   );
 
   void _preset(DpProfile profile) {

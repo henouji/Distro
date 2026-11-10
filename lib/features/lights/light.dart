@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../core/local_network.dart';
+import 'light_schedule.dart';
 
 enum DpProfile { modern, legacy, custom }
 
@@ -63,6 +64,7 @@ class LightConfig {
     this.brightnessMin = 10,
     this.valueMax = 1000,
     this.presets = const [null, null, null],
+    this.schedule,
   });
 
   final String id, name, host, localKey;
@@ -71,8 +73,15 @@ class LightConfig {
   final int switchDp, brightnessMin, valueMax;
   final int? modeDp, brightnessDp, temperatureDp, colorDp;
   final List<LightPreset?> presets;
+  final LightSchedule? schedule;
 
   void validate() {
+    schedule?.validate();
+    if (schedule != null && (brightnessDp == null || temperatureDp == null)) {
+      throw const HomeHubException(
+        'Scheduled lighting requires brightness and temperature data points.',
+      );
+    }
     if (presets.length != 3) {
       throw const HomeHubException('Each light must have three preset slots.');
     }
@@ -132,6 +141,7 @@ class LightConfig {
     'brightnessMin': brightnessMin,
     'valueMax': valueMax,
     'presets': presets.map((preset) => preset?.toJson()).toList(),
+    'schedule': schedule?.toJson(),
   };
 
   factory LightConfig.fromJson(Map<String, dynamic> json) => LightConfig(
@@ -148,6 +158,11 @@ class LightConfig {
     colorDp: json['colorDp'] as int?,
     brightnessMin: json['brightnessMin'] as int,
     valueMax: json['valueMax'] as int,
+    schedule: json['schedule'] == null
+        ? null
+        : LightSchedule.fromJson(
+            Map<String, dynamic>.from(json['schedule'] as Map),
+          ),
     presets: json['presets'] == null
         ? const [null, null, null]
         : (json['presets'] as List)

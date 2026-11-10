@@ -11,6 +11,8 @@ import 'tv_sync_engine.dart';
 /// Captures what is on this device's screen (the TV when HomeHub runs on
 /// Google TV) as a stream of averaged colors.
 abstract interface class ScreenCapture {
+  Future<void> prepare();
+
   /// Asks for capture consent and starts streaming. Returns false if denied.
   Future<bool> start({int fps});
   Future<void> stop();
@@ -22,6 +24,21 @@ abstract interface class ScreenCapture {
 class AndroidScreenCapture implements ScreenCapture {
   static const _methods = MethodChannel('homehub/screen_capture');
   static const _events = EventChannel('homehub/screen_capture/colors');
+
+  @override
+  Future<void> prepare() async {
+    try {
+      await _methods.invokeMethod<void>('prepare');
+    } on MissingPluginException {
+      throw const HomeHubException(
+        'TV Sync needs HomeHub running on an Android or Google TV.',
+      );
+    } on PlatformException catch (error) {
+      throw HomeHubException(
+        error.message ?? 'Screen capture could not start on this device.',
+      );
+    }
+  }
 
   @override
   Stream<ScreenColor> get colors => _events.receiveBroadcastStream().map(

@@ -1,0 +1,47 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="48dp"
+    android:background="@drawable/lighting_glass_panel"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+    <Button
+        android:id="@+id/light_power"
+        style="@style/LightingNotificationButton"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:layout_weight="1"
+        android:text="On"
+        android:contentDescription="Toggle light power" />
+    <Button
+        android:id="@+id/light_dim"
+        style="@style/LightingNotificationButton"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:layout_weight="1"
+        android:text="-10%"
+        android:contentDescription="Dim light by ten percent" />
+    <Button
+        android:id="@+id/light_brighten"
+        style="@style/LightingNotificationButton"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:layout_weight="1"
+        android:text="+10%"
+        android:contentDescription="Brighten light by ten percent" />
+    <Button
+        android:id="@+id/light_white"
+        style="@style/LightingNotificationButton"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:layout_weight="1"
+        android:text="White"
+        android:contentDescription="Switch between warm and cool white" />
+    <Button
+        android:id="@+id/light_color"
+        style="@style/LightingNotificationButton"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:layout_weight="1"
+        android:text="Color"
+        android:contentDescription="Cycle red, amber, green and blue" />
+</LinearLayout>

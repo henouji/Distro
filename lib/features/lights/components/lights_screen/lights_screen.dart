@@ -5,6 +5,7 @@ import '../../../../core/components/feedback.dart';
 import '../../lights_controller.dart';
 import '../light_editor.dart';
 import '../light_tile.dart';
+import '../lighting_schedule_screen.dart';
 
 class LightsScreen extends ConsumerWidget {
   const LightsScreen({super.key});
@@ -14,6 +15,16 @@ class LightsScreen extends ConsumerWidget {
     appBar: AppBar(
       title: const Text('Lights'),
       actions: [
+        IconButton(
+          tooltip: 'Dynamic lighting',
+          icon: const Icon(Icons.schedule),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => const LightingScheduleScreen(),
+            ),
+          ),
+        ),
         IconButton(
           tooltip: 'Add light',
           icon: const Icon(Icons.add),

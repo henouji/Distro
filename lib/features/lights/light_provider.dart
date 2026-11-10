@@ -188,6 +188,150 @@ class TuyaLanLightProvider implements LightProvider {
         }
       });
 
+  Future<void> setScheduledWhite(
+    LightConfig config,
+    double brightness,
+    double temperature,
+  ) {
+    if (config.brightnessDp == null || config.temperatureDp == null) {
+      throw const HomeHubException(
+        'Scheduled lighting requires brightness and temperature data points.',
+      );
+    }
+    return _write(config, {
+      if (config.modeDp != null) config.modeDp!: 'white',
+      config.temperatureDp!: (temperature * config.valueMax / 100).round(),
+      config.brightnessDp!: config.brightnessValue(brightness),
+      config.switchDp: true,
+    });
+  }
+
+  Future<Map<String, Object>> quickControl(
+    LightConfig config,
+    String requestedAction,
+  ) => _run(config, (transport) async {
+    var dps = await _readDps(transport);
+    final light = LightState.fromDps(config, dps);
+    final format = config.profile == DpProfile.legacy ? 'rgb8' : 'hsv16';
+    List<double>? color;
+    if (dps['${config.modeDp}'] == 'colour') {
+      final encoded = dps['${config.colorDp}'];
+      if (encoded is! String ||
+          !RegExp(r'^[0-9a-fA-F]+$').hasMatch(encoded) ||
+          !(format == 'rgb8' ? [6, 14] : [12]).contains(encoded.length)) {
+        throw const HomeHubException(
+          'The bulb returned an invalid color value.',
+        );
+      }
+      color = tuya.BulbDevice.hexvalueToHsv(encoded, hexformat: format);
+      if (color.any((value) => !value.isFinite || value < 0 || value > 1)) {
+        throw const HomeHubException(
+          'The bulb returned an invalid color range.',
+        );
+      }
+    }
+    final values = <int, Object>{};
+    final brightness = color == null ? light.brightness / 100 : color[2];
+    final action = switch (requestedAction) {
+      'white' => color != null || light.temperature >= 50 ? 'warm' : 'cool',
+      'color' =>
+        color == null
+            ? 'red'
+            : switch (color[0] * 360) {
+                < 44 => 'amber',
+                < 129 => 'green',
+                < 209 => 'blue',
+                _ => 'red',
+              },
+      _ => requestedAction,
+    };
+    switch (action) {
+      case 'refresh':
+        break;
+      case 'toggle':
+        values[config.switchDp] = !light.on;
+      case 'dim':
+      case 'brighten':
+        final next = (brightness + (action == 'dim' ? -.1 : .1)).clamp(
+          .01,
+          1.0,
+        );
+        if (color != null && light.hasColor) {
+          values[config.colorDp!] = tuya.BulbDevice.hsvToHexvalue(
+            color[0],
+            color[1],
+            next,
+            format,
+          );
+        } else if (light.hasBrightness) {
+          if (config.modeDp != null) values[config.modeDp!] = 'white';
+          values[config.brightnessDp!] = config.brightnessValue(next * 100);
+        } else {
+          throw const HomeHubException(
+            'Brightness is not supported by this light.',
+          );
+        }
+        values[config.switchDp] = true;
+      case 'warm':
+      case 'cool':
+        if (!light.hasTemperature) {
+          throw const HomeHubException(
+            'White temperature is not supported by this light.',
+          );
+        }
+        if (config.modeDp != null) values[config.modeDp!] = 'white';
+        values[config.temperatureDp!] = action == 'warm' ? 0 : config.valueMax;
+        values[config.switchDp] = true;
+      case 'red':
+      case 'amber':
+      case 'green':
+      case 'blue':
+        if (!light.hasColor || config.modeDp == null) {
+          throw const HomeHubException('Color is not supported by this light.');
+        }
+        final hue = switch (action) {
+          'red' => 0.0,
+          'amber' => 45.0,
+          'green' => 130.0,
+          _ => 210.0,
+        };
+        values[config.modeDp!] = 'colour';
+        values[config.colorDp!] = tuya.BulbDevice.hsvToHexvalue(
+          hue / 360,
+          1,
+          brightness.clamp(.01, 1),
+          format,
+        );
+        values[config.switchDp] = true;
+      default:
+        throw const HomeHubException('Unknown notification light control.');
+    }
+    for (final entry in values.entries) {
+      checkResponse(await transport.write(entry.key, entry.value));
+    }
+    dps = {
+      ...dps,
+      for (final entry in values.entries) '${entry.key}': entry.value,
+    };
+    final current = LightState.fromDps(config, dps);
+    final inColor = dps['${config.modeDp}'] == 'colour';
+    final currentBrightness = inColor
+        ? tuya.BulbDevice.hexvalueToHsv(
+                dps['${config.colorDp}'] as String,
+                hexformat: format,
+              )[2] *
+              100
+        : current.brightness;
+    return {
+      'name': config.name,
+      'on': current.on,
+      'brightness': currentBrightness.round(),
+      'hasBrightness': current.hasBrightness || current.hasColor,
+      'hasTemperature': current.hasTemperature,
+      'hasColor': current.hasColor,
+    };
+  });
+
   @override
   Future<void> setPower(LightConfig config, bool on) =>
       _write(config, {config.switchDp: on});

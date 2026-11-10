@@ -1,0 +1,8 @@
+<resources>
+    <color name="lighting_glass_start">#E6102B35</color>
+    <color name="lighting_glass_end">#D925253D</color>
+    <color name="lighting_glass_edge">#40FFFFFF</color>
+    <color name="lighting_glass_button">#B3233445</color>
+    <color name="lighting_glass_pressed">#FF396F79</color>
+    <color name="lighting_glass_text">#FFF0FAF8</color>
+</resources>

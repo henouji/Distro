@@ -12,6 +12,7 @@ import 'package:homehub/core/local_network.dart';
 import 'package:homehub/core/storage.dart';
 import 'package:homehub/features/lights/light.dart';
 import 'package:homehub/features/lights/light_provider.dart';
+import 'package:homehub/features/lights/light_schedule.dart';
 import 'package:homehub/features/lights/lights_controller.dart';
 import 'package:homehub/features/tv_sync/components/tv_sync_screen/tv_sync_screen.dart';
 import 'package:homehub/features/tv_sync/remote/tv_remote_host.dart';
@@ -74,6 +75,13 @@ class FakeCapture implements ScreenCapture {
   final bool allow;
   final frames = StreamController<ScreenColor>.broadcast();
   bool started = false, stopped = false;
+  String? preparationError;
+  @override
+  Future<void> prepare() async {
+    if (preparationError != null) {
+      throw HomeHubException(preparationError!);
+    }
+  }
 
   @override
   Stream<ScreenColor> get colors => frames.stream;
@@ -322,6 +330,48 @@ void main() {
       expect(state.status, TvSyncStatus.idle);
       expect(state.error, contains('not allowed'));
       expect(stream.closed, isTrue);
+    });
+
+    test(
+      'notification conflict fails before sending any light updates',
+      () async {
+        final c = await container();
+        capture.preparationError =
+            'Hide notification light controls before starting TV Sync.';
+        await c.read(tvSyncProvider.notifier).start();
+        expect(c.read(tvSyncProvider).status, TvSyncStatus.idle);
+        expect(c.read(tvSyncProvider).error, contains('Hide notification'));
+        expect(stream.sent, isEmpty);
+        expect(lights.calls, isEmpty);
+        expect(capture.stopped, isTrue);
+      },
+    );
+
+    test('cannot enable a timeline while this light is TV syncing', () async {
+      final c = await container();
+      await c.read(tvSyncProvider.notifier).start();
+      final scheduled = LightConfig.fromJson({
+        ...whiteLight.toJson(),
+        'schedule': const LightSchedule(
+          days: [1],
+          points: [
+            LightingPoint(minute: 420, brightness: 100, temperature: 80),
+            LightingPoint(minute: 1260, brightness: 10, temperature: 0),
+          ],
+        ).toJson(),
+      });
+      await expectLater(
+        c.read(lightsProvider.notifier).save(scheduled),
+        throwsA(
+          isA<HomeHubException>().having(
+            (error) => error.message,
+            'message',
+            contains('Stop TV Sync'),
+          ),
+        ),
+      );
+      expect((await c.read(lightsProvider.future)).single.schedule, isNull);
+      await c.read(tvSyncProvider.notifier).stop();
     });
 
     test('capture ending from the TV stops sync', () async {

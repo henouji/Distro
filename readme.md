@@ -17,6 +17,56 @@ color shortcuts, when supported by the bulb's
 configured data points. Temperature remains a normalized percentage: no Kelvin
 range is assumed. The FSB109CD is tunable white, not RGB.
 
+## Dynamic lighting and notification controls
+
+Open **Lights > Dynamic lighting** (the clock icon).
+
+- Create a timeline for each light with brightness and warm-to-cool temperature
+  at two or more distinct times. Choose the weekdays and enable the schedule.
+  Brightness and temperature DPs must both be configured; RGB is not required.
+- Press **Start schedules** on one HomeHub device on your home Wi-Fi.
+  The light turns on at the first time, transitions linearly between points,
+  and holds the last setting until local midnight. Nothing is sent before the
+  first time or on unselected days. There are no overnight segments or
+  automatic power-off events. At 0% brightness the configured bulb minimum
+  applies; this does not mean power off.
+- Timelines use the controller device's local clock and timezone, including
+  clock changes. Updates run approximately every 30 seconds, plus LAN request
+  time. Edits take effect at the next update. Missed intervals are not replayed:
+  reconnecting applies the current value. An unreachable light does not block
+  other lights; errors appear in this screen and the notification, with retries
+  on subsequent updates.
+- For quick access, choose a **Notification bulb** and press **Show notification
+  controls**. The collapsed notification exposes power, brightness in 10%
+  steps, **White** (alternates warm/cool) and **Color** (cycles
+  Red/Amber/Green/Blue) where supported, without expanding. Expanding is optional
+  for individual white/color presets and detailed status. Both layouts use
+  rounded translucent teal/lavender panels with light/dark system-theme colors.
+  Android controls the outer notification surface; custom notifications cannot
+  reproduce the app's live backdrop blur.
+  Color brightness changes preserve hue and saturation. **Refresh** reads the
+  bulb again; status also refreshes on the background update cycle.
+  **Hide notification controls** leaves schedules running.
+- Android runs an independent Flutter engine in a connected-device foreground
+  service, so these controls and schedules do not depend on the app's screen
+  or activity staying open. Allow notification permission. Use **Battery
+  settings** to exempt HomeHub from Android battery optimization; Doze and
+  manufacturer battery restrictions can otherwise interrupt screen-off Wi-Fi.
+  Keeping the CPU and Wi-Fi awake consumes additional power: a plugged-in
+  controller is recommended. Force-stop, Android's active-app Stop action or a
+  reboot ends execution; reopen HomeHub and start it again. No boot receiver
+  or exact alarms are installed.
+- **Stop schedules** leaves the lights unchanged and keeps pinned notification
+  controls. **Stop all** in the notification ends both. Manual light/notification
+  changes are overwritten at the next active schedule update.
+- Disable a light's schedule before TV Sync and hide notification controls
+  before starting capture, to avoid competing Tuya connections. Start
+  automation on only one HomeHub device per bulb.
+
+Timelines are saved with light configuration in encrypted storage. The native
+service stores only its schedule-running flag and selected notification light
+ID in private preferences; keys and other bulb configuration stay in the vault.
+
 ## TV Sync
 
 Install HomeHub on an Android / Google TV (for example a Xiaomi A Pro) and open
@@ -108,7 +158,9 @@ RTSP or Tuya ports. Use a trusted home network; RTSP is not encrypted.
 All light local keys and camera credentials/configuration are stored using
 `flutter_secure_storage` with encrypted Android preferences. Only theme, preview
 and TV Sync (selected light ID and slider) settings go into
-`shared_preferences`. Android app backup is disabled.
+`shared_preferences`; the native lighting service also stores its running flag
+and selected notification light ID in private preferences. Android app backup
+is disabled.
 Uninstalling or clearing app data removes configuration. There are no default
 credentials. Never commit device key files or publish native playback logs.
 

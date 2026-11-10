@@ -115,15 +115,24 @@ class TvSyncController extends Notifier<TvSyncState> {
     );
     try {
       final lights = await ref.read(lightsProvider.future);
-      final light = lights.where((item) => item.id == state.lightId).firstOrNull;
+      final light = lights
+          .where((item) => item.id == state.lightId)
+          .firstOrNull;
       if (light == null) {
         throw const HomeHubException('Choose a light to sync with the TV.');
       }
       light.validate();
+      if (light.schedule?.enabled == true) {
+        throw const HomeHubException(
+          'Disable this light\'s dynamic lighting schedule before starting TV Sync.',
+        );
+      }
+      _capture = ref.read(screenCaptureProvider);
+      await _capture!.prepare();
+      if (session != _session) return;
       _mode = syncModeFor(light);
       _light = light;
       _lights = ref.read(lightServiceProvider);
-      _capture = ref.read(screenCaptureProvider);
       try {
         _previous = await _lights!.read(light);
       } catch (_) {

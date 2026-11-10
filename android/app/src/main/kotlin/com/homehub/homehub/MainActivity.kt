@@ -12,6 +12,7 @@ import android.graphics.Canvas
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Process
+import android.os.PowerManager
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -21,6 +22,8 @@ import java.io.ByteArrayOutputStream
 
 class MainActivity : FlutterActivity() {
     companion object {
+        var tvSyncPreparing = false
+            private set
         private const val ICON_SIZE = 96
         private const val BACKGROUND_BLOCKED =
             "HomeHub on the TV is in the background and is not allowed to open apps. " +
@@ -28,6 +31,42 @@ class MainActivity : FlutterActivity() {
     }
 
     private var resumed = false
+    private var lightingPermissionResult: MethodChannel.Result? = null
+    private var lightingRequest: Intent? = null
+
+    private fun startLighting(intent: Intent, result: MethodChannel.Result) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            result.success(null)
+        } catch (error: Exception) {
+            result.error("lighting_start", "Cannot start scheduled lighting. Open HomeHub and retry.", null)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 4108) {
+            val result = lightingPermissionResult ?: return
+            lightingPermissionResult = null
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                val intent = lightingRequest
+                lightingRequest = null
+                if (intent != null) startLighting(intent, result)
+                else result.error("lighting_start", "Open HomeHub and retry.", null)
+            } else {
+                lightingRequest = null
+                result.error("notifications", "Allow notifications to run lighting schedules with a visible Stop control.", null)
+            }
+        }
+    }
 
     override fun onResume() {
         super.onResume()
@@ -42,10 +81,69 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+        MethodChannel(messenger, "homehub/lighting").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start", "pin" -> {
+                    val id = call.argument<String>("lightId")
+                    val intent = Intent(this, LightingService::class.java).setAction(call.method)
+                        .putExtra("lightId", id)
+                    if (call.method == "pin" && id.isNullOrBlank()) {
+                        result.error("light", "Choose a light for notification controls.", null)
+                    } else if (call.method == "pin" &&
+                        (tvSyncPreparing || ScreenCaptureService.sink != null)
+                    ) {
+                        result.error("sync", "Stop TV Sync before showing notification light controls.", null)
+                    } else if (lightingPermissionResult != null) {
+                        result.error("busy", "Notification permission is already being requested.", null)
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        lightingPermissionResult = result
+                        lightingRequest = intent
+                        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4108)
+                    } else {
+                        startLighting(intent, result)
+                    }
+                }
+                "stop", "hide" -> {
+                    if (LightingService.running) {
+                        startService(Intent(this, LightingService::class.java).setAction(call.method))
+                    }
+                    result.success(null)
+                }
+                "status" -> result.success(
+                    mapOf(
+                        "running" to (LightingService.running && LightingService.schedulesEnabled),
+                        "quickLightId" to if (LightingService.running) LightingService.controlsLightId else null,
+                        "batteryOptimized" to !getSystemService(PowerManager::class.java)
+                            .isIgnoringBatteryOptimizations(packageName),
+                        "error" to LightingService.error,
+                    ),
+                )
+                "batterySettings" -> {
+                    try {
+                        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        result.success(null)
+                    } catch (error: Exception) {
+                        result.error("settings", "Open Android settings and allow unrestricted battery use for HomeHub.", null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(messenger, "homehub/screen_capture").setMethodCallHandler { call, result ->
             when (call.method) {
+                "prepare" -> {
+                    if (LightingService.running && LightingService.controlsLightId != null) {
+                        result.error("light_controls", "Hide notification light controls before starting TV Sync.", null)
+                    } else {
+                        tvSyncPreparing = true
+                        result.success(null)
+                    }
+                }
                 "start" -> requestCapture(call.argument<Int>("fps") ?: 5, result)
                 "stop" -> {
+                    tvSyncPreparing = false
                     stopService(Intent(this, ScreenCaptureService::class.java))
                     result.success(null)
                 }
@@ -85,6 +183,7 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         // Light updates run in Dart; capture is pointless once the engine is gone.
         ScreenCaptureService.sink = null
+        tvSyncPreparing = false
         stopService(Intent(this, ScreenCaptureService::class.java))
         super.cleanUpFlutterEngine(flutterEngine)
     }
@@ -94,6 +193,10 @@ class MainActivity : FlutterActivity() {
         resumed || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || Settings.canDrawOverlays(this)
 
     private fun requestCapture(requestedFps: Int, result: MethodChannel.Result) {
+        if (LightingService.running && LightingService.controlsLightId != null) {
+            result.error("light_controls", "Hide notification light controls before starting TV Sync.", null)
+            return
+        }
         if (CaptureConsentActivity.callback != null) {
             result.error("busy", "Screen capture permission is already being requested.", null)
             return
