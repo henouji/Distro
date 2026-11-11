@@ -24,9 +24,12 @@ class LightingService : Service() {
     companion object {
         private const val CHANNEL_ID = "dynamic_lighting"
         private const val NOTIFICATION_ID = 4108
+        private const val MOTION_STOP_GRACE_MS = 300_000L
         var running = false
             private set
         var schedulesEnabled = false
+            private set
+        var motionEnabled = false
             private set
         var controlsLightId: String? = null
             private set
@@ -40,6 +43,7 @@ class LightingService : Service() {
     private var busy = false
     private var quickInfo: Map<*, *>? = null
     private var scheduleError: String? = null
+    private var motionError: String? = null
     private var controlError: String? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -50,6 +54,11 @@ class LightingService : Service() {
             stopSelf()
         }
     }
+    private val stopWhenIdle = Runnable {
+        if (!schedulesEnabled && !motionEnabled && controlsLightId == null) {
+            stopSelf()
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -57,6 +66,7 @@ class LightingService : Service() {
         super.onCreate()
         val saved = getSharedPreferences("lighting_runtime", MODE_PRIVATE)
         schedulesEnabled = saved.getBoolean("schedules", false)
+        motionEnabled = saved.getBoolean("motion", false)
         controlsLightId = saved.getString("lightId", null)
     }
 
@@ -66,7 +76,10 @@ class LightingService : Service() {
             controlsLightId = null
         }
         when (intent?.action) {
-            "start" -> schedulesEnabled = true
+            "start" -> {
+                schedulesEnabled = true
+                main.removeCallbacks(stopWhenIdle)
+            }
             "stop" -> {
                 schedulesEnabled = false
                 scheduleError = null
@@ -75,6 +88,7 @@ class LightingService : Service() {
                 controlsLightId = intent.getStringExtra("lightId")
                 quickInfo = null
                 controlError = null
+                main.removeCallbacks(stopWhenIdle)
             }
             "hide" -> {
                 controlsLightId = null
@@ -83,17 +97,37 @@ class LightingService : Service() {
             }
             "stopAll" -> {
                 schedulesEnabled = false
+                motionEnabled = false
                 controlsLightId = null
+                motionError = null
+                main.removeCallbacks(stopWhenIdle)
+                main.postDelayed(stopWhenIdle, MOTION_STOP_GRACE_MS)
+            }
+            "motionStart" -> {
+                motionEnabled = true
+                motionError = null
+                main.removeCallbacks(stopWhenIdle)
+            }
+            "motionStop" -> {
+                motionEnabled = false
+                motionError = null
+                main.removeCallbacks(stopWhenIdle)
+                main.postDelayed(stopWhenIdle, MOTION_STOP_GRACE_MS)
             }
         }
         getSharedPreferences("lighting_runtime", MODE_PRIVATE).edit()
             .putBoolean("schedules", schedulesEnabled)
+            .putBoolean("motion", motionEnabled)
             .putString("lightId", controlsLightId)
             .apply()
-        if (!schedulesEnabled && controlsLightId == null) {
+        if (!schedulesEnabled && !motionEnabled && controlsLightId == null) {
             error = null
-            stopSelf()
-            return START_NOT_STICKY
+            if (!running || intent?.action !in listOf("motionStop", "stopAll")) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            updateNotification()
+            return START_STICKY
         }
         if (running) {
             if (intent?.action == "control" &&
@@ -143,9 +177,12 @@ class LightingService : Service() {
                                 result.success(null)
                                 control("refresh")
                             }
-                            "configuration" -> result.success(mapOf("schedules" to schedulesEnabled))
+                            "configuration" -> result.success(
+                                mapOf("schedules" to schedulesEnabled, "motion" to motionEnabled),
+                            )
                             "report" -> {
                                 scheduleError = call.argument<String>("error")
+                                motionError = call.argument<String>("motionError")
                                 updateNotification()
                                 result.success(null)
                                 control("refresh")
@@ -206,7 +243,8 @@ class LightingService : Service() {
     }
 
     private fun updateNotification() {
-        error = listOfNotNull(scheduleError, controlError).joinToString("\n").ifEmpty { null }
+        error = listOfNotNull(scheduleError, motionError, controlError)
+            .joinToString("\n").ifEmpty { null }
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
     }
 
@@ -239,7 +277,12 @@ class LightingService : Service() {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(if (error != null) "Lighting needs attention" else "HomeHub lighting")
             .setContentText(if (error != null) "Open HomeHub to see the error." else
-                if (schedulesEnabled) "Dynamic lighting schedules are running." else "Quick light controls are ready.")
+                when {
+                    schedulesEnabled && motionEnabled -> "Schedules and camera motion lighting are running."
+                    schedulesEnabled -> "Dynamic lighting schedules are running."
+                    motionEnabled -> "Camera motion lighting is monitoring."
+                    else -> "Quick light controls are ready."
+                })
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

@@ -337,13 +337,31 @@ relative directional controls, not absolute degree sliders: no measured angle,
 home position or calibration is assumed. Errors are displayed in the panel.
 Tablet landscape places controls alongside video; narrow layouts stack them.
 
-This implementation has automated protocol tests but is not physically verified
-against a C200. Firmware must support ONVIF continuous pan/tilt and its timeout.
+The PTZ implementation has automated protocol tests but is not physically
+verified against a C200. Firmware must support ONVIF continuous pan/tilt and its timeout.
 If connection or movement is rejected, check the dedicated camera account,
 third-party access settings, firmware, camera time and LAN reachability.
 See [TP-Link's RTSP/ONVIF guide](https://www.tp-link.com/us/support/faq/2680/).
 Local HTTP/RTSP is not encrypted; use a trusted network and block WAN access
 at your router if required.
+
+### C200C Motion Event Test
+
+Edit a saved camera and tap **Test motion events**. During the 20-second
+listening period, move in front of the camera. HomeHub checks whether ONVIF
+advertises an event service, creates a temporary PullPoint subscription and
+looks for an active motion event. This read-only test does not control lights.
+A successful subscription with no event means the camera supports ONVIF events,
+but no motion event was observed during the test.
+
+To enable automation, edit the camera and select a configured light under
+**Motion-triggered light**. Saving starts HomeHub's foreground service, which
+keeps monitoring with a persistent notification while the device is on home
+Wi-Fi. Choose the motion color and brightness and set the no-motion off delay
+from 1 to 300 seconds. Color control requires mode and color data points; without
+those mappings, HomeHub uses white mode and brightness when supported, or only
+turns power on/off. A light already on when motion starts is left unchanged.
+Choose **Disabled** to stop that camera's automation.
 
 ## Troubleshooting
 

@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/storage.dart';
+import '../lights/lighting_runtime.dart';
 import 'camera.dart';
 
 final camerasProvider =
@@ -23,6 +26,7 @@ class CamerasController extends AsyncNotifier<List<CameraConfig>> {
         .read(vaultProvider)
         .writeList('cameras', next.map((item) => item.toJson()).toList());
     state = AsyncData(next);
+    await _syncMotionService(next);
   }
 
   Future<void> delete(String id) async {
@@ -31,5 +35,14 @@ class CamerasController extends AsyncNotifier<List<CameraConfig>> {
         .read(vaultProvider)
         .writeList('cameras', next.map((item) => item.toJson()).toList());
     state = AsyncData(next);
+    await _syncMotionService(next);
+  }
+
+  Future<void> _syncMotionService(List<CameraConfig> cameras) async {
+    if (Platform.isAndroid) {
+      await LightingRuntime().setMotionEnabled(
+        cameras.any((camera) => camera.motionLightId != null),
+      );
+    }
   }
 }

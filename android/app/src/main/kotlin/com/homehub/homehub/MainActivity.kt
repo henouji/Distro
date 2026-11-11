@@ -43,7 +43,7 @@ class MainActivity : FlutterActivity() {
             }
             result.success(null)
         } catch (error: Exception) {
-            result.error("lighting_start", "Cannot start scheduled lighting. Open HomeHub and retry.", null)
+            result.error("lighting_start", "Cannot start background lighting. Open HomeHub and retry.", null)
         }
     }
 
@@ -63,7 +63,7 @@ class MainActivity : FlutterActivity() {
                 else result.error("lighting_start", "Open HomeHub and retry.", null)
             } else {
                 lightingRequest = null
-                result.error("notifications", "Allow notifications to run lighting schedules with a visible Stop control.", null)
+                result.error("notifications", "Allow notifications to run background lighting with a visible Stop control.", null)
             }
         }
     }
@@ -83,7 +83,7 @@ class MainActivity : FlutterActivity() {
         val messenger = flutterEngine.dartExecutor.binaryMessenger
         MethodChannel(messenger, "homehub/lighting").setMethodCallHandler { call, result ->
             when (call.method) {
-                "start", "pin" -> {
+                "start", "pin", "motionStart" -> {
                     val id = call.argument<String>("lightId")
                     val intent = Intent(this, LightingService::class.java).setAction(call.method)
                         .putExtra("lightId", id)
@@ -105,15 +105,20 @@ class MainActivity : FlutterActivity() {
                         startLighting(intent, result)
                     }
                 }
-                "stop", "hide" -> {
+                "stop", "hide", "motionStop" -> {
                     if (LightingService.running) {
                         startService(Intent(this, LightingService::class.java).setAction(call.method))
+                    } else if (call.method == "motionStop") {
+                        getSharedPreferences("lighting_runtime", MODE_PRIVATE).edit()
+                            .putBoolean("motion", false)
+                            .apply()
                     }
                     result.success(null)
                 }
                 "status" -> result.success(
                     mapOf(
                         "running" to (LightingService.running && LightingService.schedulesEnabled),
+                        "motionEnabled" to (LightingService.running && LightingService.motionEnabled),
                         "quickLightId" to if (LightingService.running) LightingService.controlsLightId else null,
                         "batteryOptimized" to !getSystemService(PowerManager::class.java)
                             .isIgnoringBatteryOptimizations(packageName),

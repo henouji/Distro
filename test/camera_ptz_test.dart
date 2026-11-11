@@ -243,9 +243,30 @@ void main() {
     () {
       final old = {...ptzCamera.toJson()}
         ..remove('panTilt')
-        ..remove('onvifPort');
+        ..remove('onvifPort')
+        ..remove('motionBrightness')
+        ..remove('motionHue')
+        ..remove('motionSaturation')
+        ..remove('motionOffDelaySeconds');
       expect(CameraConfig.fromJson(old).panTilt, isFalse);
       expect(CameraConfig.fromJson(old).onvifPort, 2020);
+      expect(CameraConfig.fromJson(old).motionBrightness, 100);
+      expect(CameraConfig.fromJson(old).motionHue, 0);
+      expect(CameraConfig.fromJson(old).motionSaturation, 1);
+      expect(CameraConfig.fromJson(old).motionOffDelaySeconds, 20);
+      final motion = CameraConfig.fromJson({
+        ...ptzCamera.toJson(),
+        'motionLightId': 'light-1',
+        'motionBrightness': 35,
+        'motionHue': 210,
+        'motionSaturation': .7,
+        'motionOffDelaySeconds': 75,
+      });
+      expect(motion.motionBrightness, 35);
+      expect(motion.motionHue, 210);
+      expect(motion.motionSaturation, .7);
+      expect(motion.motionOffDelaySeconds, 75);
+      expect(motion.toJson()['motionOffDelaySeconds'], 75);
       expect(
         CameraConfig.fromJson(ptzCamera.toJson()).toJson(),
         ptzCamera.toJson(),
